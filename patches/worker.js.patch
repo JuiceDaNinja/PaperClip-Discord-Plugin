@@ -1,0 +1,198 @@
+--- a/dist/worker.js
++++ b/dist/worker.js
+@@ -12,7 +12,49 @@
+ import { registerWatch, checkWatches } from "./proactive-suggestions.js";
+ import { describeUnusableSecretRef, isUsableSecretRef, normalizeSecretRefId, resolveStartupDiscordBotToken, summarizeError, toSecretRefBinding, SECRET_RESOLUTION_ISSUE_URL, } from "./runtime-token.js";
+ import { getEscalation, saveEscalation, trackPendingEscalation, untrackPendingEscalation, collectPendingEscalationIds, } from "./escalation-state.js";
++import { syncInteractionCards } from "./interaction-cards.js";
++import { setBoundCompanyId } from "./company-resolver.js";
+ const SNOWFLAKE_ID_REGEX = /^\d{17,20}$/;
++/**
++ * PATCH (JUI-4): run a function outside the host invocation that is on the stack.
++ *
++ * The host delivers configuration through `onConfigChanged` and binds that call
++ * to a host-issued invocation id held in an AsyncLocalStorage. A socket opened
++ * inside that call inherits the context, and Node replays the context on every
++ * later read of that socket. The gateway socket is opened from
++ * `bootstrapRuntime`, which `onConfigChanged` awaits, so every Discord gateway
++ * event — every slash command — used to run carrying the invocation id of a
++ * config delivery that had long finished. The host no longer knows that id, so
++ * it refused every company-scoped call made from a slash command with
++ * "the worker referenced a missing, expired, or unknown invocation scope".
++ *
++ * The drain timer below is created while this module is evaluated, before any
++ * invocation exists, so its callbacks always run with an empty context. Work
++ * handed to `runOutsideInvocationScope` therefore starts clean, and so does
++ * every socket and timer that work creates — including the gateway's own
++ * reconnects, which are scheduled from inside that clean lineage.
++ */
++const _escapeQueue = [];
++const _escapeTimer = setInterval(() => {
++    while (_escapeQueue.length > 0) {
++        const job = _escapeQueue.shift();
++        if (job)
++            job();
++    }
++}, 5);
++_escapeTimer.unref?.();
++function runOutsideInvocationScope(fn) {
++    return new Promise((resolve, reject) => {
++        _escapeQueue.push(() => {
++            try {
++                resolve(fn());
++            }
++            catch (err) {
++                reject(err);
++            }
++        });
++    });
++}
+ /** Returned by tools and actions invoked before the runtime is bootstrapped. */
+ const RUNTIME_NOT_READY_MESSAGE = "Discord plugin is not configured yet: save the plugin configuration for this company to activate it.";
+ /** Captured in setup() so onWebhook / onConfigChanged can reach the host APIs. */
+@@ -818,6 +860,9 @@
+     // callbacks observe the new configuration immediately.
+     const rt = existing ?? {};
+     rt.companyId = companyId;
++    // PATCH (JUI-4): let the command-path resolver name this company without a
++    // wildcard company list, which the host denies outside its own invocations.
++    setBoundCompanyId(companyId);
+     rt.config = config;
+     rt.token = token;
+     rt.tokenSecretId = normalizeSecretRefId(config.discordBotTokenRef) ?? "";
+@@ -880,7 +925,12 @@
+     }
+     if (!reuseGateway) {
+         try {
+-            rt.gateway = await connectGateway(ctx, token, 
++            // PATCH (JUI-4): open the gateway outside the config-delivery
++            // invocation. The socket keeps the async context it is created in, and
++            // Node replays that context on every gateway event, so a socket born
++            // inside `onConfigChanged` makes every slash command quote a dead
++            // invocation id and the host denies all of its company-scoped calls.
++            rt.gateway = await runOutsideInvocationScope(() => connectGateway(ctx, token,
+             // Every callback reads the CURRENT runtime rather than closing over the
+             // one that existed at connect time — a reused connection must never keep
+             // serving a superseded configuration.
+@@ -916,7 +966,7 @@
+                     }
+                     runtimeHealth = { status: "degraded", message, details };
+                 },
+-            });
++            }));
+         }
+         catch (err) {
+             const error = summarizeError(err, [token]);
+@@ -1443,8 +1493,11 @@
+                 await ctx.state.set({ scopeKind: "instance", stateKey: `approval_${event.entityId}` }, { channelId, messageId });
+             });
+         });
+-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+-        ctx.events.on("approval.approved", async (event) => {
++        // The host only ever emits `approval.decided`; there are no
++        // `approval.approved` / `approval.rejected` event types, so the two
++        // handlers this replaces never fired and an approval's Discord message
++        // kept its buttons forever after a decision.
++        ctx.events.on("approval.decided", async (event) => {
+             const rt = await ensureRuntime(ctx, event.companyId);
+             if (!rt || !rt.config.notifyOnApprovalCreated)
+                 return;
+@@ -1454,44 +1507,53 @@
+             });
+             if (!record)
+                 return;
+-            const decidedBy = event.actorId ?? "";
+-            const label = decidedBy ? `✅ Approved by ${decidedBy}` : "✅ Approved";
++            // `approval.decided` carries the activity details only, which say
++            // nothing about which way the decision went. Read the decision off the
++            // approval itself.
++            let status = "";
++            let decidedBy = String(event.actorId ?? "");
++            try {
++                const response = await paperclipFetch(`${rt.baseUrl}/api/approvals/${event.entityId}`, undefined, rt.paperclipBoardApiKey);
++                const approval = (await response.json());
++                status = String(approval.status ?? "").toLowerCase();
++                decidedBy = String(approval.decidedByUserId ?? decidedBy);
++            }
++            catch (err) {
++                ctx.logger.warn("Could not read decided approval", {
++                    approvalId: event.entityId,
++                    error: summarizeError(err),
++                });
++                return;
++            }
++            if (status === "pending")
++                return;
++            const approved = status === "approved";
++            const verb = approved
++                ? "✅ Approved"
++                : status === "rejected"
++                    ? "❌ Rejected"
++                    : status === "revision_requested"
++                        ? "✏️ Revision requested"
++                        : `⚪ ${status || "Closed"}`;
+             await rt.adapter.editMessage(record.channelId, record.messageId, {
+                 embeds: [
+                     {
+-                        title: label,
+-                        color: COLORS.GREEN,
++                        title: decidedBy ? `${verb} by ${decidedBy}` : verb,
++                        color: approved
++                            ? COLORS.GREEN
++                            : status === "rejected"
++                                ? COLORS.RED
++                                : COLORS.GRAY,
+                         footer: { text: "Paperclip" },
+                         timestamp: event.occurredAt,
+                     },
+                 ],
+                 components: [],
+             });
+-        });
+-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+-        ctx.events.on("approval.rejected", async (event) => {
+-            const rt = await ensureRuntime(ctx, event.companyId);
+-            if (!rt || !rt.config.notifyOnApprovalCreated)
+-                return;
+-            const record = await ctx.state.get({
++            await ctx.state.delete({
+                 scopeKind: "instance",
+                 stateKey: `approval_${event.entityId}`,
+             });
+-            if (!record)
+-                return;
+-            const decidedBy = event.actorId ?? "";
+-            const label = decidedBy ? `❌ Rejected by ${decidedBy}` : "❌ Rejected";
+-            await rt.adapter.editMessage(record.channelId, record.messageId, {
+-                embeds: [
+-                    {
+-                        title: label,
+-                        color: COLORS.RED,
+-                        footer: { text: "Paperclip" },
+-                        timestamp: event.occurredAt,
+-                    },
+-                ],
+-                components: [],
+-            });
+         });
+         ctx.events.on("agent.run.failed", async (event) => {
+             const rt = await ensureRuntime(ctx, event.companyId);
+@@ -1700,6 +1762,18 @@
+             };
+         });
+         // ===================================================================
++        // Issue-thread interaction cards (questions / approvals)
++        //
++        // The host emits no plugin event for issue-thread interactions, so these
++        // cards are discovered by polling the board. See ./interaction-cards.js.
++        // ===================================================================
++        ctx.jobs.register("discord-interaction-cards", async () => {
++            const rt = await ensureRuntime(ctx);
++            if (!rt || rt.config.notifyOnInteractionCards === false)
++                return;
++            await syncInteractionCards(ctx, rt, resolveChannel);
++        });
++        // ===================================================================
+         // Phase 1: Escalation timeout check job
+         // ===================================================================
+         ctx.jobs.register("check-escalation-timeouts", async () => {
