@@ -674,7 +674,7 @@ async function handleCompanies(ctx) {
         }
         const lines = companies.map((c) => {
             const label = c.name ?? c.id;
-            return `📋 **${label}**\\n\\u00A0\\u00A0\\u00A0\\u00A0ID: \\`${c.id}\\``;
+            return `📋 **${label}**\n    ID: \`${c.id}\``;
         });
         const embeds = [
             {
@@ -732,7 +732,7 @@ async function handleProjects(ctx, companyId, companyFilter) {
             const emoji = statusEmoji[p.status ?? ""] ?? "📁";
             const label = p.name ?? p.id;
             const status = p.status ? ` · ${humanizeStatus(p.status)}` : "";
-            return `${emoji} **${label}**${status}\\n\\u00A0\\u00A0\\u00A0\\u00A0ID: \\`${p.id}\\``;
+            return `${emoji} **${label}**${status}\n    ID: \`${p.id}\``;
         });
         const title = companyLabel ? `Projects (${companyLabel})` : `Projects (${projects.length})`;
         const embeds = [
