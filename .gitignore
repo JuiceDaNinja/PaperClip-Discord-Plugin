@@ -1,0 +1,12 @@
+node_modules/
+*.pre-patch
+*.log
+.DS_Store
+
+# Never commit these — a bot token or a command dump pulled from your own
+# Discord application is yours, not something to publish.
+*.env
+.env*
+*bot-token*
+*-backup.json
+global-commands-backup.json

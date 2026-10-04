@@ -1,0 +1,8 @@
+{
+  "name": "paperclip-plugins",
+  "private": true,
+  "comment": "Drop this in your Paperclip plugins directory and run `npm install`. The version is pinned exactly, with no caret: this patch set is built against the compiled dist output of 0.11.0 and a minor upgrade would both overwrite it and make it unsafe to re-apply.",
+  "dependencies": {
+    "paperclip-plugin-discord": "0.11.0"
+  }
+}
