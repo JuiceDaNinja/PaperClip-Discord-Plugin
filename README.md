@@ -178,6 +178,16 @@ this repository stops being needed.
 
 ## Licence
 
-`paperclip-plugin-discord` is MIT licensed. Its licence is kept verbatim at
-`LICENSE` and `upstream-0.11.0/LICENSE`, and covers both the upstream code
-included here and these modifications of it.
+This project is based on
+[paperclip-plugin-discord](https://github.com/mvanhorn/paperclip-plugin-discord)
+by Matt Van Horn.
+
+The original project is licensed under the MIT License.
+
+Copyright (c) 2026 Matt Van Horn
+
+The original MIT licence is preserved verbatim in `LICENSE` and
+`upstream-0.11.0/LICENSE`.
+
+Modifications and patches in this repository are also distributed
+under the MIT License.
