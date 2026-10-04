@@ -36,9 +36,9 @@ answer landed on the board.
 
 | Path | What it is |
 | --- | --- |
-| `patched/` | the patched files, including `interaction-cards.js` |
-| `upstream-0.11.0/` | untouched upstream 0.11.0 files |
-| `patches/` | the change as unified diffs |
+| `patched/interaction-cards.js` | the new module, shipped whole — it has no upstream counterpart |
+| `patches/` | the changes to the five existing files, as unified diffs |
+| `checksums/` | sha256 for the upstream 0.11.0 files and for the patched outputs |
 | `install.sh` | apply the patch, or put it back after an upgrade wipes it |
 | `uninstall.sh` | restore upstream files |
 

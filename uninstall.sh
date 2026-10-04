@@ -3,18 +3,18 @@
 #
 # Restores the .pre-patch copies install.sh saved, so you get back exactly what
 # was in dist/ before the patch was first applied. If those are gone, falls
-# back to the untouched upstream 0.11.0 files in upstream-0.11.0/.
+# back to reinstalling the package from npm.
 #
 # Usage:
-#   ./uninstall.sh
-#   PLUGINS_ROOT=/path/to/plugins ./uninstall.sh
+#   bash uninstall.sh
+#   PLUGINS_ROOT=/path/to/plugins bash uninstall.sh
 #
 # Restart the plugin afterwards, through the lifecycle (see README.md).
 set -euo pipefail
 
-HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PKG_NAME=paperclip-plugin-discord
-UPSTREAM_FILES="worker.js commands.js manifest.js constants.js company-resolver.js"
+REQUIRED_VERSION=0.11.0
+PATCHED_FILES="worker.js commands.js manifest.js constants.js company-resolver.js"
 
 find_plugins_root() {
   if [ -n "${PLUGINS_ROOT:-}" ]; then echo "$PLUGINS_ROOT"; return; fi
@@ -39,22 +39,13 @@ fi
 LIVE=$PLUGINS_ROOT/node_modules/$PKG_NAME/dist
 [ -d "$LIVE" ] || { echo "No plugin install at $LIVE" >&2; exit 1; }
 
-restored_from_backup=0
-for f in $UPSTREAM_FILES; do
+restored=0
+for f in $PATCHED_FILES; do
   if [ -f "$LIVE/$f.pre-patch" ]; then
     mv "$LIVE/$f.pre-patch" "$LIVE/$f"
-    restored_from_backup=1
+    restored=1
   fi
 done
-
-if [ "$restored_from_backup" = "1" ]; then
-  echo "Restored the pre-patch files at $LIVE."
-else
-  for f in $UPSTREAM_FILES; do
-    cp "$HERE/upstream-0.11.0/$f" "$LIVE/$f"
-  done
-  echo "No .pre-patch backups found. Restored upstream 0.11.0 files at $LIVE."
-fi
 
 # interaction-cards.js does not exist upstream. Put back a pre-patch copy if
 # there was one, otherwise remove the file the patch added.
@@ -62,6 +53,16 @@ if [ -f "$LIVE/interaction-cards.js.pre-patch" ]; then
   mv "$LIVE/interaction-cards.js.pre-patch" "$LIVE/interaction-cards.js"
 else
   rm -f "$LIVE/interaction-cards.js"
+fi
+
+rm -f "$LIVE/.pcdp-backup-taken"
+
+if [ "$restored" = "1" ]; then
+  echo "Restored the pre-patch files at $LIVE."
+else
+  echo "No .pre-patch backups found. Reinstalling $PKG_NAME@$REQUIRED_VERSION ..."
+  ( cd "$PLUGINS_ROOT" && npm install "$PKG_NAME@$REQUIRED_VERSION" --force )
+  echo "Reinstalled $PKG_NAME $REQUIRED_VERSION at $PLUGINS_ROOT."
 fi
 
 cat <<'EOF'

@@ -89,14 +89,15 @@ Upstream would need to drop the wildcard for it to be reliable.
 
 ## Files
 
-- The patched files: `patched/worker.js`, `patched/company-resolver.js`
 - The change as diffs: `patches/worker.js.patch`,
   `patches/company-resolver.js.patch`
-- Apply, or re-apply after a plugin upgrade: `install.sh`. It refuses to run on
-  any version other than 0.11.0 — re-cut the patch instead.
+- Apply, or re-apply after a plugin upgrade: `install.sh`. It applies those
+  diffs to your installed 0.11.0 files and checks the result against
+  `checksums/patched.sha256`. It refuses to run on any version other than
+  0.11.0 — re-cut the patch instead.
 - Revert to upstream: `uninstall.sh`
 
-`install.sh` saves whatever was in `dist/` before it ran as
+`install.sh` saves whatever was in `dist/` before it first ran as
 `<file>.pre-patch`, so `uninstall.sh` can go back to that exact state even if
 it was not upstream.
 

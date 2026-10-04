@@ -10,9 +10,10 @@ instance:
    posts task created/completed pings only, so anything that needs a human
    answer never leaves the board.
 
-This is **not a fork**. It is six files that replace or add to the published
-package's compiled `dist/` output. You install the plugin from npm as normal,
-then run `install.sh`.
+This is **not a fork**, and it does not vendor upstream's code. It is five
+diffs plus one new file. `install.sh` takes the 0.11.0 files you already have
+from npm, applies the diffs, checks the result against a published sha256, and
+only then writes into your install.
 
 > Built and verified against 0.11.0 on 2026-10-04. Check the upstream project
 > first — if a later release ships these fixes natively, use that instead.
@@ -22,13 +23,13 @@ then run `install.sh`.
 - A self-hosted Paperclip instance you administer, reachable at
   `http://127.0.0.1:3100` by default.
 - Node.js (the version your Paperclip install already needs — 0.11.0's
-  dependencies ask for Node 24.11 or newer).
+  dependencies ask for Node 24.11 or newer), and `npm`.
 - `paperclip-plugin-discord` at exactly **0.11.0**.
 - A Discord application with a bot, already set up per the
   [upstream setup steps](https://github.com/mvanhorn/paperclip-plugin-discord#setup):
   bot token stored as a Paperclip **company secret**, the secret's UUID in
   `discordBotTokenRef`, plus `defaultGuildId` and `defaultChannelId`.
-- `bash`, `curl`, `sha256sum`. Linux or macOS.
+- `bash`, `patch`, `sha256sum`, `tar`, `curl`. Linux or macOS.
 
 If the plugin is not working for you *before* the patch, fix that first. This
 patch set assumes a plugin that is installed, configured, and enabled.
@@ -46,25 +47,27 @@ bash install.sh
 bash install.sh --bootstrap
 ```
 
-(`bash install.sh` rather than `./install.sh` so it works whether or not the
-execute bit survived the clone. `chmod +x install.sh uninstall.sh` if you
-prefer.)
-
 `install.sh` finds your plugins directory on its own — it tries `PLUGINS_ROOT`,
 then `$PAPERCLIP_HOME/plugins`, then `~/.paperclip/plugins`, then any
 `node_modules/paperclip-plugin-discord` under `~/.paperclip`. Override it when
 your install is somewhere else:
 
 ```sh
-PLUGINS_ROOT=/path/to/.paperclip/plugins ./install.sh
+PLUGINS_ROOT=/path/to/.paperclip/plugins bash install.sh
 ```
 
-Before it changes anything the script:
+### What it does, in order
 
-- refuses to run on any version except 0.11.0,
-- verifies the clone against `CHECKSUMS.sha256`,
-- saves each live file as `<file>.pre-patch`, once, so `uninstall.sh` can put
-  back exactly what was there.
+1. Refuses to run on any version except 0.11.0.
+2. Collects pristine 0.11.0 files — from the `.pre-patch` backup of an earlier
+   run, or your current install, or a fresh `npm pack` download — and checks
+   all five against `checksums/upstream-0.11.0.sha256`.
+3. Applies `patches/*.patch` in a temporary directory and checks the six
+   resulting files against `checksums/patched.sha256`.
+4. Only then saves each live file as `<file>.pre-patch`, once, and copies the
+   patched files in.
+
+If any check fails it stops and leaves your install untouched.
 
 ## Restart the plugin — this step is not optional
 
@@ -99,8 +102,9 @@ curl -sX POST http://127.0.0.1:3100/api/plugins/<PLUGIN_ID>/enable
 bash uninstall.sh
 ```
 
-Restores the `.pre-patch` copies, or the untouched upstream files if those are
-gone, and removes the added `interaction-cards.js`. Restart the plugin after.
+Restores the `.pre-patch` copies and removes the added `interaction-cards.js`.
+If the backups are gone it reinstalls 0.11.0 from npm instead. Restart the
+plugin after.
 
 ## What the patches change
 
@@ -115,7 +119,7 @@ gone, and removes the added `interaction-cards.js`. Restart the plugin after.
 Full write-ups, including the reproduction and the verification output, are in
 [`docs/`](docs/).
 
-## Which files are patched
+## Which files change
 
 Against upstream 0.11.0:
 
@@ -134,28 +138,25 @@ Nothing else in the package is modified.
 
 | Path | What it is |
 | --- | --- |
-| `patched/` | The six working files. Drop-in replacements for `node_modules/paperclip-plugin-discord/dist/`. |
-| `upstream-0.11.0/` | The same five files untouched, as published on npm, plus the package's MIT `LICENSE`. Byte-identical to the registry tarball. |
-| `patches/` | The changes as unified diffs, for reading and review. |
+| `patches/` | The five changes as unified diffs. Readable, reviewable, and what `install.sh` actually applies. |
+| `patched/interaction-cards.js` | The one new module. It has no upstream counterpart, so it ships whole. |
+| `checksums/` | sha256 for the upstream 0.11.0 files and for the six patched outputs. |
 | `docs/` | The three write-ups: cause, fix, and verification for each problem. |
 | `install.sh`, `uninstall.sh` | Apply and remove the patch set. |
 | `examples/plugins-package.json` | A plugins `package.json` pinned to exactly 0.11.0. |
-| `CHECKSUMS.sha256` | Confirms a clone matches what was published. |
 
-Verify a clone yourself:
-
-```sh
-sha256sum -c CHECKSUMS.sha256
-```
+Upstream's compiled output is deliberately **not** copied into this repository.
+`install.sh` gets it from npm, where it is published, and verifies its hashes —
+so there is one source of truth for upstream's code, and it is not this repo.
 
 ## Known limits — read before you rely on this
 
 - **An upgrade wipes it.** This edits files inside a local npm install. Any
   upgrade or reinstall of `paperclip-plugin-discord` overwrites the patch. Pin
   the version, and re-run `install.sh` after any reinstall.
-- **It is built against 0.11.0's compiled output and must not be copied onto a
-  newer build.** `install.sh` enforces this. On a newer version, re-cut the
-  patch from `patches/` — or first check whether upstream now ships these fixes.
+- **The diffs are cut against 0.11.0's compiled output.** They will not apply to
+  a different build, and `install.sh` refuses to try. On a newer version, re-cut
+  them — or first check whether upstream now ships these fixes.
 - **`/clip companies` is still unreliable.** It issues a wildcard company list,
   which from a gateway event only succeeds while the host has no other
   invocation in flight. No other command depends on it. Fixing it needs an
@@ -178,16 +179,6 @@ this repository stops being needed.
 
 ## Licence
 
-This project is based on
-[paperclip-plugin-discord](https://github.com/mvanhorn/paperclip-plugin-discord)
-by Matt Van Horn.
-
-The original project is licensed under the MIT License.
-
-Copyright (c) 2026 Matt Van Horn
-
-The original MIT licence is preserved verbatim in `LICENSE` and
-`upstream-0.11.0/LICENSE`.
-
-Modifications and patches in this repository are also distributed
-under the MIT License.
+`paperclip-plugin-discord` is MIT licensed, and the diffs here are derivative of
+it. `LICENSE` carries that licence verbatim; it covers both the changes in
+`patches/` and the new `patched/interaction-cards.js`.
