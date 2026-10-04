@@ -1,0 +1,34 @@
+--- a/dist/commands.js
++++ b/dist/commands.js
+@@ -7,6 +7,7 @@
+ import { resolveCompanyId } from "./company-resolver.js";
+ import { getEscalation } from "./escalation-state.js";
+ import { getWorkflowStore, saveWorkflowStore, runWorkflow, resumeWorkflowAfterApproval, BUILTIN_COMMANDS, } from "./workflow-engine.js";
++import { handleInteractionCardComponent, handleInteractionCardModal, isInteractionCardComponentId, isInteractionCardModalId, } from "./interaction-cards.js";
+ function getOption(options, name) {
+     return options
+         ?.find((o) => o.name === name)
+@@ -293,6 +294,13 @@
+     if (interaction.type === 4 && interaction.data) {
+         return handleAutocomplete(ctx, interaction.data, cmdCtx);
+     }
++    // MODAL_SUBMIT. Only interaction cards raise modals today; anything else
++    // falls through to the unknown-type reply below.
++    if (interaction.type === 5 &&
++        interaction.data &&
++        isInteractionCardModalId(interaction.data.custom_id)) {
++        return handleInteractionCardModal(ctx, interaction.data, interaction.member?.user.username ?? interaction.user?.username ?? "Discord user", cmdCtx);
++    }
+     return respondToInteraction({
+         type: 4,
+         content: "Unknown interaction type.",
+@@ -943,6 +951,9 @@
+     const base = cmdCtx?.baseUrl ?? "http://localhost:3100";
+     const token = cmdCtx?.token ?? "";
+     const apiKey = cmdCtx?.paperclipBoardApiKey ?? "";
++    if (isInteractionCardComponentId(customId)) {
++        return handleInteractionCardComponent(ctx, data, actor, cmdCtx);
++    }
+     if (customId.startsWith("approval_approve_")) {
+         const approvalId = customId.replace("approval_approve_", "");
+         ctx.logger.info("Approval button clicked", { approvalId, action: "approve", actor });

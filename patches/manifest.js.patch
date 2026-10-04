@@ -1,0 +1,28 @@
+--- a/dist/manifest.js
++++ b/dist/manifest.js
+@@ -123,6 +123,12 @@
+                 title: "Notify on agent error",
+                 default: DEFAULT_CONFIG.notifyOnAgentError,
+             },
++            notifyOnInteractionCards: {
++                type: "boolean",
++                title: "Post task questions and approvals to Discord",
++                description: "Post pending question and approve/reject cards from task threads into the approvals channel, with buttons you can answer from Discord.",
++                default: DEFAULT_CONFIG.notifyOnInteractionCards,
++            },
+             enableIntelligence: {
+                 type: "boolean",
+                 title: "Enable community intelligence",
+@@ -265,6 +271,12 @@
+     },
+     jobs: [
+         {
++            jobKey: "discord-interaction-cards",
++            displayName: "Discord Interaction Cards",
++            description: "Post pending task questions and approval cards to Discord with buttons, and close them out once resolved.",
++            schedule: "* * * * *",
++        },
++        {
+             jobKey: "discord-intelligence-scan",
+             displayName: "Discord Intelligence Scan",
+             description: "Periodically scan configured Discord channels for community signals.",

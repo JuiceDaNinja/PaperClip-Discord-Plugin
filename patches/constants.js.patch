@@ -1,0 +1,10 @@
+--- a/dist/constants.js
++++ b/dist/constants.js
+@@ -25,6 +25,7 @@
+     notifyOnIssueDone: true,
+     notifyOnApprovalCreated: true,
+     notifyOnAgentError: true,
++    notifyOnInteractionCards: true,
+     enableIntelligence: false,
+     intelligenceChannelIds: [],
+     escalationChannelId: "",
