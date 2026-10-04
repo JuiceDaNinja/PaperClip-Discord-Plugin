@@ -177,8 +177,17 @@ open an issue saying which versions and what happened — that is the most usefu
 thing anyone can add here. The ideal outcome is that these land upstream and
 this repository stops being needed.
 
-## Licence
+## License & Attribution
 
-`paperclip-plugin-discord` is MIT licensed, and the diffs here are derivative of
-it. `LICENSE` carries that licence verbatim; it covers both the changes in
-`patches/` and the new `patched/interaction-cards.js`.
+This project is based on
+[paperclip-plugin-discord](https://github.com/mvanhorn/paperclip-plugin-discord)
+by Matt Van Horn.
+
+The original project is licensed under the MIT License.
+
+Copyright (c) 2026 Matt Van Horn
+
+The original MIT license is preserved in the `LICENSE` file.
+
+Modifications and patches made by this project are also distributed
+under the MIT License.
