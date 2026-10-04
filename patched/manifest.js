@@ -14,8 +14,6 @@ const manifest = {
         "issue.comments.read",
         "issues.create",
         "issues.update",
-        "issue.interactions.read",
-        "issue.interactions.respond",
         "agents.read",
         "agent.sessions.create",
         "agent.sessions.send",
