@@ -12,8 +12,6 @@ is ever told a card exists.
 
 The patch adds:
 
-- Capabilities `issue.interactions.read` and `issue.interactions.respond` to the
-  plugin manifest.
 - A scheduled job (~every 60s) that lists pending cards on open tasks and posts each
   one to the approvals channel as an embed with Discord components.
 - Handlers so a button press calls `respondInteraction` / `accept` / `reject`, then
@@ -24,6 +22,12 @@ The patch adds:
 - Fix for a separate upstream bug: the plugin subscribed to `approval.approved` and
   `approval.rejected`, neither of which exists. The real event is `approval.decided`,
   so company-level Approvals never updated their Discord message after a decision.
+
+The plugin manifest's capability list is **not** changed. The SDK's
+`respondInteraction` needs `issue.interactions.read` and
+`issue.interactions.respond`, which this plugin does not declare, so
+`interaction-cards.js` calls the board's own REST routes instead — the same
+routes the web app uses, with the configured board API key.
 
 Verified end to end on 2026-10-04: a question card was answered from Discord and the
 answer landed on the board.
