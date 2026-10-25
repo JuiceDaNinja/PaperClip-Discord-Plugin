@@ -1,0 +1,35 @@
+--- a/dist/routes/tool-gateway.js
++++ b/dist/routes/tool-gateway.js
+@@ -8,6 +8,14 @@
+ import { forbidden, HttpError } from "../errors.js";
+ import { accessService } from "../services/index.js";
+ import { listConnectionLifecycleEvents } from "../services/tool-connection-activity.js";
++// MCP requires structuredContent to be a JSON object when the field is present.
++// Plugin ToolResult.data is optional and untyped, so spread this instead of
++// emitting the field unconditionally: a null or scalar fails client validation.
++function structuredContentField(data) {
++    if (!data || typeof data !== "object" || Array.isArray(data))
++        return {};
++    return { structuredContent: data };
++}
+ const TOOL_ACTIVITY_EVENT_TYPES = [
+     "call_completed",
+     "call_failed",
+@@ -160,7 +168,7 @@
+                         : {},
+                     callerHeaders: headers,
+                 });
+-                res.json({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result, isError: false } });
++                res.json({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: JSON.stringify(result) }], ...structuredContentField(result), isError: false } });
+                 return;
+             }
+             const result = await toolGateway.executeTool({
+@@ -182,7 +190,7 @@
+                 id,
+                 result: {
+                     content: [{ type: "text", text: contentText }],
+-                    structuredContent: resultRecord?.data ?? null,
++                    ...structuredContentField(resultRecord?.data),
+                     isError: false,
+                 },
+             });

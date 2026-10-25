@@ -73,4 +73,9 @@ again with:
   "the worker referenced a missing, expired, or unknown invocation scope"
 
 and no approval or question cards in Discord.
+
+This only undoes the plugin patch. The host fix, if you applied it, is still in
+place — it is unrelated to the plugin and harmless to leave. To undo that too:
+
+  bash host-patches/apply-structuredcontent-fix.sh --revert
 EOF
