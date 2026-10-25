@@ -10,13 +10,21 @@ instance:
    posts task created/completed pings only, so anything that needs a human
    answer never leaves the board.
 
+It also carries one separate fix to the **host**, `@paperclipai/server`, without
+which no agent can call any of the plugin's MCP tools. That one lives in
+[`host-patches/`](host-patches/) and has its own script — see
+[Host patch](#host-patch--plugin-mcp-tools) below. It is independent of the
+plugin patch set: neither needs the other.
+
 This is **not a fork**, and it does not vendor upstream's code. It is five
 diffs plus one new file. `install.sh` takes the 0.11.0 files you already have
 from npm, applies the diffs, checks the result against a published sha256, and
 only then writes into your install.
 
-> Built and verified against 0.11.0 on 2026-10-04. Check the upstream project
-> first — if a later release ships these fixes natively, use that instead.
+> Built and verified against 0.11.0 on 2026-10-04. The host patch was built and
+> verified against `@paperclipai/server` 2026.1023.0 on 2026-10-25. Check the
+> upstream projects first — if a later release ships these fixes natively, use
+> that instead.
 
 ## Requirements
 
@@ -96,6 +104,53 @@ curl -sX POST http://127.0.0.1:3100/api/plugins/<PLUGIN_ID>/enable
   should appear in your approvals channel, and pressing a button should answer
   it on the board.
 
+Both of those work whether or not you apply the host patch below — they go
+Discord → plugin gateway → host REST and never cross the MCP bridge.
+
+## Host patch — plugin MCP tools
+
+**This patches Paperclip itself, not the plugin.** It is optional for the two
+checks above and required for anything else.
+
+Without it, every MCP tool the plugin publishes fails client-side schema
+validation, so no agent can call `discord_signals`, `escalate_to_human`,
+`handoff_to_agent`, `discuss_with_agent`, `register_watch` or
+`register_custom_command`. `@paperclipai/server` emits
+`structuredContent: resultRecord?.data ?? null`, but `ToolResult.data` is
+optional in the plugin SDK contract, and MCP requires that field to be a JSON
+object when it is present. The plugin is spec-compliant; the host is not. Any
+plugin whose tools return only `content` hits this, not just this one.
+
+```sh
+bash host-patches/apply-structuredcontent-fix.sh            # patch
+bash host-patches/apply-structuredcontent-fix.sh --dry-run  # report only
+bash host-patches/apply-structuredcontent-fix.sh --revert   # put the original back
+```
+
+The script finds `@paperclipai/server` in your npx cache, verifies the file
+against `checksums/host-upstream-2026.1023.0.sha256`, applies the diff, and
+checks the result against `checksums/host-patched-2026.1023.0.sha256`. It is
+idempotent and it refuses to force a patch that does not apply cleanly. If
+`$HOME` is remapped, or the host lives somewhere else:
+
+```sh
+NPX_CACHE=/path/to/.npm/_npx  bash host-patches/apply-structuredcontent-fix.sh
+SERVER_PKG=/path/to/node_modules/@paperclipai/server \
+  bash host-patches/apply-structuredcontent-fix.sh
+```
+
+**Restart the host afterwards.** Node holds the old module in memory, so a
+running server keeps serving `structuredContent: null` until it restarts. The
+plugin worker is a child of the host process, so this recycles the Discord
+gateway too — it reconnects on its own.
+
+**Re-run it after every Paperclip CLI update.** The host runs from an npx cache
+directory named after a hash of the CLI spec, so a version bump installs into a
+*new* directory and the fix disappears with no error to tell you.
+
+Full write-up:
+[`docs/README-host-structuredcontent-null.md`](docs/README-host-structuredcontent-null.md).
+
 ## Uninstall
 
 ```sh
@@ -106,6 +161,12 @@ Restores the `.pre-patch` copies and removes the added `interaction-cards.js`.
 If the backups are gone it reinstalls 0.11.0 from npm instead. Restart the
 plugin after.
 
+`uninstall.sh` only touches the plugin. To undo the host patch as well:
+
+```sh
+bash host-patches/apply-structuredcontent-fix.sh --revert
+```
+
 ## What the patches change
 
 | Problem | Fix |
@@ -115,6 +176,7 @@ plugin after.
 | Question and approval cards never reach Discord. | Adds a scheduled job that lists pending cards on open tasks and posts each as an embed with buttons, plus handlers so a press answers the card on the board. Free-text answers open a modal. |
 | Company-level approvals never update their Discord message after a decision. | The plugin subscribed to `approval.approved` and `approval.rejected`, neither of which exists. The real event is `approval.decided`. |
 | The command picker lists every command twice. | No code change — this one is a config mistake on your Discord application. See [`docs/README-discord-duplicate-commands.md`](docs/README-discord-duplicate-commands.md). |
+| **Host, not plugin:** every plugin MCP tool call is rejected by the client with `structuredContent: null`. | The host emitted the field unconditionally from an optional SDK field. Omit it unless the value is a plain object. Applied by `host-patches/apply-structuredcontent-fix.sh`, not by `install.sh`. |
 
 Full write-ups, including the reproduction and the verification output, are in
 [`docs/`](docs/).
@@ -134,14 +196,22 @@ dist/interaction-cards.js   new file, 777 lines
 
 Nothing else in the package is modified.
 
+The host patch is separate, and against `@paperclipai/server` 2026.1023.0 it
+touches one file:
+
+```
+dist/routes/tool-gateway.js   2 changed lines, 8 added
+```
+
 ## Layout
 
 | Path | What it is |
 | --- | --- |
 | `patches/` | The five changes as unified diffs. Readable, reviewable, and what `install.sh` actually applies. |
 | `patched/interaction-cards.js` | The one new module. It has no upstream counterpart, so it ships whole. |
-| `checksums/` | sha256 for the upstream 0.11.0 files and for the six patched outputs. |
-| `docs/` | The three write-ups: cause, fix, and verification for each problem. |
+| `host-patches/` | The one patch to Paperclip itself, plus its own apply/revert script. `install.sh` does not touch it. |
+| `checksums/` | sha256 for the upstream 0.11.0 files and for the six patched outputs, plus the `host-*` pair for the host file. |
+| `docs/` | The write-ups: cause, fix, and verification for each problem. |
 | `install.sh`, `uninstall.sh` | Apply and remove the patch set. |
 | `examples/plugins-package.json` | A plugins `package.json` pinned to exactly 0.11.0. |
 
@@ -157,6 +227,11 @@ so there is one source of truth for upstream's code, and it is not this repo.
 - **The diffs are cut against 0.11.0's compiled output.** They will not apply to
   a different build, and `install.sh` refuses to try. On a newer version, re-cut
   them — or first check whether upstream now ships these fixes.
+- **A Paperclip CLI update wipes the host patch too, and more quietly.** The
+  host runs from an npx cache directory named after a hash of the CLI spec, so
+  a version bump installs into a *new* directory. Nothing fails loudly; the
+  plugin's MCP tools just stop working again. Re-run
+  `host-patches/apply-structuredcontent-fix.sh` after every update.
 - **`/clip companies` is still unreliable.** It issues a wildcard company list,
   which from a gateway event only succeeds while the host has no other
   invocation in flight. No other command depends on it. Fixing it needs an
