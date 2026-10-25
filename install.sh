@@ -207,4 +207,12 @@ plugin off and on in the Paperclip board, or:
   curl -sX POST http://127.0.0.1:3100/api/plugins/<PLUGIN_ID>/enable
 
 See README.md for how to find <PLUGIN_ID>.
+
+Separately: if you want agents to be able to call this plugin's MCP tools, the
+host needs a one-line fix as well. Slash commands and interaction cards do not
+depend on it.
+
+  bash host-patches/apply-structuredcontent-fix.sh --dry-run
+
+See docs/README-host-structuredcontent-null.md.
 EOF
