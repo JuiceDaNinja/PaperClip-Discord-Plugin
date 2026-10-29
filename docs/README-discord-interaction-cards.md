@@ -23,6 +23,31 @@ The patch adds:
   `approval.rejected`, neither of which exists. The real event is `approval.decided`,
   so company-level Approvals never updated their Discord message after a decision.
 
+## Agent-addressed cards are posted too
+
+An earlier version of this module skipped any card carrying an `addresseeAgentId`,
+on the reading that such a card was that agent's to resolve. That was wrong, and it
+cost real decisions: cards were withheld from Discord with no other notification, and
+some of them expired unanswered.
+
+`addresseeAgentId` is wake routing — it says which agent was woken to look at the
+card. It is not an authorization boundary. The complete set of resolver policies the
+host can express is `anyone`, `not_creator` and `human_only` (plus the deprecated
+`board_or_agents` / `board_only`); **every one of them admits a board actor**, so
+there is no such thing as a pending card a human is not allowed to answer. The board
+UI has always shown and accepted these cards.
+
+So every pending card posts, regardless of addressee. Addressed ones carry a line
+naming who else was asked — *"Asked of AIDevManager — you can answer it too."* — so
+the card does not read as though Discord were the only place it landed. Agent names
+are looked up once per poll and best-effort: if that lookup fails the card still
+posts, just without the name.
+
+The tradeoff is some new noise. An agent-addressed card now appears in Discord even
+when the agent answers it a minute later, so you will see cards flip to
+"✅ Answered" shortly after arriving. The poller's existing close-out pass does that
+rewrite automatically, so the noise cleans itself up.
+
 The plugin manifest's capability list is **not** changed. The SDK's
 `respondInteraction` needs `issue.interactions.read` and
 `issue.interactions.respond`, which this plugin does not declare, so
