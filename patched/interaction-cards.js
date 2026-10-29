@@ -91,7 +91,12 @@ function errorMessage(error) {
 // ---------------------------------------------------------------------------
 function issueLabel(card) {
     const identifier = card.issueIdentifier ? `${card.issueIdentifier} · ` : "";
-    return truncate(`${identifier}${card.issueTitle ?? "Task"}`, 240);
+    const label = truncate(`${identifier}${card.issueTitle ?? "Task"}`, 240);
+    // Cards with an addressee carry a note saying who else was asked, so the
+    // card does not read as though it were addressed to Discord alone.
+    return card.addresseeLabel
+        ? `${label}\n_${truncate(card.addresseeLabel, 240)}_`
+        : label;
 }
 function kindLabel(kind) {
     if (kind === "ask_user_questions")
@@ -396,6 +401,29 @@ async function readSelections(ctx, interactionId) {
 // Poll job
 // ---------------------------------------------------------------------------
 /**
+ * Display names for the company's agents, keyed by id.
+ *
+ * Only used to label a card's addressee, so a failed lookup costs the label
+ * and not the card: callers get an empty map and post anyway.
+ */
+async function agentNames(ctx, base, apiKey, companyId) {
+    const names = new Map();
+    try {
+        const agents = (await boardJson(base, apiKey, `/api/companies/${companyId}/agents`));
+        for (const agent of Array.isArray(agents) ? agents : []) {
+            if (agent?.id)
+                names.set(String(agent.id), String(agent.name ?? agent.role ?? agent.id));
+        }
+    }
+    catch (error) {
+        ctx.logger.debug("Could not resolve agent names for interaction cards", {
+            companyId,
+            error: errorMessage(error),
+        });
+    }
+    return names;
+}
+/**
  * Post newly pending interaction cards and close out tracked cards that were
  * resolved elsewhere (on the board, or by another surface).
  */
@@ -426,6 +454,8 @@ export async function syncInteractionCards(ctx, rt, resolveChannel) {
         .sort((left, right) => String(right.updatedAt ?? "").localeCompare(String(left.updatedAt ?? "")))
         .slice(0, ISSUE_SCAN_LIMIT);
     const seenPending = new Set();
+    // Resolved lazily, once per poll, and only if an addressed card turns up.
+    let names = null;
     for (const issue of open) {
         let interactions;
         try {
@@ -441,13 +471,26 @@ export async function syncInteractionCards(ctx, rt, resolveChannel) {
         for (const interaction of Array.isArray(interactions) ? interactions : []) {
             if (interaction.status !== "pending")
                 continue;
-            // A card addressed to a specific agent is that agent's to resolve.
-            if (interaction.addresseeAgentId)
-                continue;
+            // `addresseeAgentId` says which agent was woken to look at the card.
+            // It is not an authorization boundary: every resolver policy the host
+            // can express (`anyone`, `not_creator`, `human_only`) admits a board
+            // actor, so there is no such thing as a pending card a human may not
+            // answer. An earlier version skipped addressed cards here, which
+            // silently withheld them from Discord — including ones that then
+            // expired with nobody notified. Post them, and say who else was asked.
             seenPending.add(interaction.id);
             const existing = (await readState(ctx, cardStateKey(interaction.id)));
             if (existing?.messageId)
                 continue;
+            let addresseeLabel = null;
+            if (interaction.addresseeAgentId) {
+                if (!names)
+                    names = await agentNames(ctx, base, apiKey, companyId);
+                const addressee = names.get(String(interaction.addresseeAgentId));
+                addresseeLabel = addressee
+                    ? `Asked of ${addressee} — you can answer it too.`
+                    : "Also asked of an agent — you can answer it too.";
+            }
             const card = {
                 interactionId: interaction.id,
                 issueId: issue.id,
@@ -457,6 +500,7 @@ export async function syncInteractionCards(ctx, rt, resolveChannel) {
                 kind: interaction.kind,
                 issueIdentifier: issue.identifier ?? null,
                 issueTitle: issue.title ?? null,
+                addresseeLabel,
                 postedAt: new Date().toISOString(),
             };
             const { embeds, components } = buildCard(interaction, card, {});
