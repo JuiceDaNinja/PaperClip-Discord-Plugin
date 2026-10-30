@@ -1,0 +1,64 @@
+--- a/escalation-state.js	2026-10-30 13:06:44.898233356 -0400
++++ b/escalation-state.js	2026-10-30 13:06:44.902029083 -0400
+@@ -1,3 +1,4 @@
++import { readLegacyDefaultScope } from "./legacy-scope.js";
+ // ---------------------------------------------------------------------------
+ // State helpers — company-aware with backward-compat fallback
+ // ---------------------------------------------------------------------------
+@@ -8,9 +9,8 @@
+         if (raw)
+             return raw;
+     }
+-    // Backward-compat fallback
+-    const fallback = await ctx.state.get({ scopeKind: "company", scopeId: "default", stateKey: key });
+-    return fallback ?? null;
++    // Backward-compat fallback; a refusal is the same answer as a miss.
++    return await readLegacyDefaultScope(ctx, key);
+ }
+ export async function saveEscalation(ctx, record) {
+     const scopeId = record.companyId || "default";
+@@ -19,9 +19,9 @@
+ export async function trackPendingEscalation(ctx, escalationId, escalationCompanyId = "default") {
+     const key = "escalation_pending_ids";
+     let raw = await ctx.state.get({ scopeKind: "company", scopeId: escalationCompanyId, stateKey: key });
+-    // Backward-compat fallback for reads
++    // Backward-compat fallback for reads; a refusal is the same answer as a miss.
+     if (!raw && escalationCompanyId !== "default") {
+-        raw = await ctx.state.get({ scopeKind: "company", scopeId: "default", stateKey: key });
++        raw = await readLegacyDefaultScope(ctx, key);
+     }
+     const ids = raw ?? [];
+     if (!ids.includes(escalationId)) {
+@@ -32,9 +32,9 @@
+ export async function untrackPendingEscalation(ctx, escalationId, escalationCompanyId = "default") {
+     const key = "escalation_pending_ids";
+     let raw = await ctx.state.get({ scopeKind: "company", scopeId: escalationCompanyId, stateKey: key });
+-    // Backward-compat fallback for reads
++    // Backward-compat fallback for reads; a refusal is the same answer as a miss.
+     if (!raw && escalationCompanyId !== "default") {
+-        raw = await ctx.state.get({ scopeKind: "company", scopeId: "default", stateKey: key });
++        raw = await readLegacyDefaultScope(ctx, key);
+     }
+     const ids = raw ?? [];
+     const filtered = ids.filter((id) => id !== escalationId);
+@@ -49,11 +49,15 @@
+     const seenIds = new Set();
+     const pendingIds = [];
+     for (const sid of scopeIds) {
+-        const raw = await ctx.state.get({
+-            scopeKind: "company",
+-            scopeId: sid,
+-            stateKey: "escalation_pending_ids",
+-        });
++        // The legacy scope is read best-effort: a governed host refuses it, and
++        // that refusal must not take down the escalation-timeout job.
++        const raw = sid === "default"
++            ? await readLegacyDefaultScope(ctx, "escalation_pending_ids")
++            : await ctx.state.get({
++                scopeKind: "company",
++                scopeId: sid,
++                stateKey: "escalation_pending_ids",
++            });
+         for (const id of (raw ?? [])) {
+             if (!seenIds.has(id)) {
+                 seenIds.add(id);

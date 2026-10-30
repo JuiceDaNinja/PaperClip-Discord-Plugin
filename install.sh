@@ -16,8 +16,8 @@ set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REQUIRED_VERSION=0.11.0
 PKG_NAME=paperclip-plugin-discord
-PATCHED_FILES="worker.js commands.js manifest.js constants.js company-resolver.js"
-ADDED_FILES="interaction-cards.js"
+PATCHED_FILES="worker.js commands.js manifest.js constants.js company-resolver.js escalation-state.js session-registry.js"
+ADDED_FILES="interaction-cards.js legacy-scope.js"
 ALL_FILES="$PATCHED_FILES $ADDED_FILES"
 
 BOOTSTRAP=0
