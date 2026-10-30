@@ -39,7 +39,14 @@ const ACTIONABLE_KINDS = new Set([
 ]);
 const ISSUE_PAGE_LIMIT = 100;
 const ISSUE_SCAN_LIMIT = 40;
-const TRACKED_CARD_LIMIT = 200;
+/**
+ * Retention cap on tracked cards, most recent first.
+ *
+ * Board decision on JUI-95: "only allow latest 100 cards to show" — a bounded
+ * recency window was chosen over paginating the whole issue list, so the issue
+ * fetch deliberately stays at a single page.
+ */
+const TRACKED_CARD_LIMIT = 100;
 /** Five action rows per message; one is reserved for the submit controls. */
 const MAX_SELECT_ROWS = 4;
 const MAX_SELECT_OPTIONS = 25;
@@ -55,14 +62,61 @@ function truncate(value, max) {
     const text = String(value ?? "");
     return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
-function readState(ctx, stateKey) {
-    return ctx.state.get({ scopeKind: "instance", stateKey });
+// Card tracking is bookkeeping, not the job. Posting the card is the job.
+//
+// A governed host can refuse `scopeKind: "instance"` state access outright
+// instead of returning empty — the refusal throws, and nothing in the poll
+// loop catches it. One refusal therefore killed the entire pass: the poller
+// still fetched the board and still built the card, then died on the
+// duplicate-check read before it ever called Discord. No card, no retry, and
+// no log line, because the throw escaped past every logging site in the
+// module. Silence of exactly that shape is what sent us looking at the
+// gateway for a day.
+//
+// So: never let bookkeeping take the post down. Mirror every card into an
+// in-process map and fall back to it when the host will not serve us. The
+// degradation is real and worth naming — tracking no longer survives a worker
+// restart, so a restart can re-post a card that is still pending — but an
+// in-process index is enough to stop the same card being re-posted every
+// minute, which is the failure that would actually hurt.
+const memoryState = new Map();
+let stateDegraded = false;
+function noteStateDegraded(ctx, operation, error) {
+    if (stateDegraded)
+        return;
+    stateDegraded = true;
+    ctx.logger.warn("Interaction-card tracking fell back to memory; host state is unavailable. Cards will still post, but tracking will not survive a worker restart.", { operation, error: errorMessage(error) });
 }
-function writeState(ctx, stateKey, value) {
-    return ctx.state.set({ scopeKind: "instance", stateKey }, value);
+async function readState(ctx, stateKey) {
+    try {
+        const stored = await ctx.state.get({ scopeKind: "instance", stateKey });
+        // A miss falls through to the in-process map: anything there was posted
+        // by this worker, so treating it as posted is what prevents duplicates.
+        if (stored != null)
+            return stored;
+    }
+    catch (error) {
+        noteStateDegraded(ctx, "get", error);
+    }
+    return memoryState.get(stateKey) ?? null;
 }
-function clearState(ctx, stateKey) {
-    return ctx.state.delete({ scopeKind: "instance", stateKey });
+async function writeState(ctx, stateKey, value) {
+    memoryState.set(stateKey, value);
+    try {
+        await ctx.state.set({ scopeKind: "instance", stateKey }, value);
+    }
+    catch (error) {
+        noteStateDegraded(ctx, "set", error);
+    }
+}
+async function clearState(ctx, stateKey) {
+    memoryState.delete(stateKey);
+    try {
+        await ctx.state.delete({ scopeKind: "instance", stateKey });
+    }
+    catch (error) {
+        noteStateDegraded(ctx, "delete", error);
+    }
 }
 async function boardJson(base, apiKey, path, init) {
     const response = await withRetry(() => paperclipFetch(`${base}${path}`, init, apiKey));

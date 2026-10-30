@@ -1,10 +1,11 @@
---- a/dist/worker.js
-+++ b/dist/worker.js
-@@ -12,7 +12,49 @@
+--- a/worker.js	2026-10-30 13:06:44.912968847 -0400
++++ b/worker.js	2026-10-30 13:06:44.916968907 -0400
+@@ -12,7 +12,50 @@
  import { registerWatch, checkWatches } from "./proactive-suggestions.js";
  import { describeUnusableSecretRef, isUsableSecretRef, normalizeSecretRefId, resolveStartupDiscordBotToken, summarizeError, toSecretRefBinding, SECRET_RESOLUTION_ISSUE_URL, } from "./runtime-token.js";
  import { getEscalation, saveEscalation, trackPendingEscalation, untrackPendingEscalation, collectPendingEscalationIds, } from "./escalation-state.js";
 +import { syncInteractionCards } from "./interaction-cards.js";
++import { readLegacyDefaultScope } from "./legacy-scope.js";
 +import { setBoundCompanyId } from "./company-resolver.js";
  const SNOWFLAKE_ID_REGEX = /^\d{17,20}$/;
 +/**
@@ -50,7 +51,25 @@
  /** Returned by tools and actions invoked before the runtime is bootstrapped. */
  const RUNTIME_NOT_READY_MESSAGE = "Discord plugin is not configured yet: save the plugin configuration for this company to activate it.";
  /** Captured in setup() so onWebhook / onConfigChanged can reach the host APIs. */
-@@ -818,6 +860,9 @@
+@@ -496,13 +539,11 @@
+             scopeId: escalationCompanyId,
+             stateKey: `escalation_${mapping.entityId}`,
+         });
+-        // Backward-compat fallback: check "default" scope if company-scoped read returns null
++        // Backward-compat fallback: check "default" scope if the company-scoped
++        // read returns null. Best-effort — a governed host refuses this scope,
++        // and that refusal carries the same information as a miss.
+         if (!record && escalationCompanyId !== "default") {
+-            record = await ctx.state.get({
+-                scopeKind: "company",
+-                scopeId: "default",
+-                stateKey: `escalation_${mapping.entityId}`,
+-            });
++            record = await readLegacyDefaultScope(ctx, `escalation_${mapping.entityId}`);
+         }
+         // Two state reads happened above; nothing has been written yet.
+         if (!isLive())
+@@ -818,6 +859,9 @@
      // callbacks observe the new configuration immediately.
      const rt = existing ?? {};
      rt.companyId = companyId;
@@ -60,7 +79,7 @@
      rt.config = config;
      rt.token = token;
      rt.tokenSecretId = normalizeSecretRefId(config.discordBotTokenRef) ?? "";
-@@ -880,7 +925,12 @@
+@@ -880,7 +924,12 @@
      }
      if (!reuseGateway) {
          try {
@@ -74,7 +93,7 @@
              // Every callback reads the CURRENT runtime rather than closing over the
              // one that existed at connect time — a reused connection must never keep
              // serving a superseded configuration.
-@@ -916,7 +966,7 @@
+@@ -916,7 +965,7 @@
                      }
                      runtimeHealth = { status: "degraded", message, details };
                  },
@@ -83,7 +102,7 @@
          }
          catch (err) {
              const error = summarizeError(err, [token]);
-@@ -1443,8 +1493,11 @@
+@@ -1443,8 +1492,11 @@
                  await ctx.state.set({ scopeKind: "instance", stateKey: `approval_${event.entityId}` }, { channelId, messageId });
              });
          });
@@ -97,7 +116,7 @@
              const rt = await ensureRuntime(ctx, event.companyId);
              if (!rt || !rt.config.notifyOnApprovalCreated)
                  return;
-@@ -1454,44 +1507,53 @@
+@@ -1454,44 +1506,53 @@
              });
              if (!record)
                  return;
@@ -177,7 +196,7 @@
          });
          ctx.events.on("agent.run.failed", async (event) => {
              const rt = await ensureRuntime(ctx, event.companyId);
-@@ -1700,6 +1762,18 @@
+@@ -1700,6 +1761,18 @@
              };
          });
          // ===================================================================
